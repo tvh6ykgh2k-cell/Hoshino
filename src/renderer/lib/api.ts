@@ -1,11 +1,14 @@
-import type { Persona, AppSettings, Stage, TopicProgress, ChatSession } from '../../shared/types';
+import type { Persona, AppSettings, Stage, TopicProgress, TopicStatus, ChatSession } from '../../shared/types';
 
 declare global {
   interface Window {
     electronAPI: {
       sendMessage: (payload: { sessionId: string; content: string }) => Promise<void>;
+      streamChat: (payload: { sessionId: string; messages: any[] }) => Promise<void>;
       onStreamChunk: (callback: (chunk: string) => void) => void;
       removeStreamListener: () => void;
+      onStreamDone: (callback: () => void) => void;
+      onStreamError: (callback: (error: string) => void) => void;
       createSession: (stageId: string) => Promise<ChatSession>;
       listSessions: () => Promise<ChatSession[]>;
       getProgress: () => Promise<TopicProgress[]>;
@@ -35,7 +38,9 @@ export const api = {
     window.electronAPI.listSessions(),
   getProgress: () =>
     window.electronAPI.getProgress(),
-  updateProgress: (topicId: string, status: string, score?: number) =>
+  streamChat: (sessionId: string, messages: any[]) =>
+    window.electronAPI.streamChat({ sessionId, messages }),
+  updateProgress: (topicId: string, status: TopicStatus, score?: number) =>
     window.electronAPI.updateProgress({ topicId, status, score }),
   loadCurriculum: () =>
     window.electronAPI.loadCurriculum(),

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { TopicProgress } from '../../shared/types';
+import type { TopicProgress, TopicStatus } from '../../shared/types';
 import { api } from '../lib/api';
 
 export function useProgress() {
@@ -13,16 +13,16 @@ export function useProgress() {
     });
   }, []);
 
-  const updateProgress = useCallback(async (topicId: string, status: string, score?: number) => {
+  const updateProgress = useCallback(async (topicId: string, status: TopicStatus, score?: number) => {
     await api.updateProgress(topicId, status, score);
     setProgress(prev => {
       const existing = prev.find(p => p.topicId === topicId);
       if (existing) {
-        return prev.map(p => p.topicId === topicId ? { ...p, status: status as any, score: score ?? p.score } : p);
+        return prev.map(p => p.topicId === topicId ? { ...p, status, score: score ?? p.score } : p);
       }
       return [...prev, {
         topicId,
-        status: status as any,
+        status,
         startedAt: new Date().toISOString(),
         completedAt: status === 'mastered' ? new Date().toISOString() : null,
         score: score ?? null,

@@ -1,13 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const electronAPI = {
+  // Channel strings must match IPC_CHANNELS in src/shared/constants.ts
   sendMessage: (payload: { sessionId: string; content: string }) =>
     ipcRenderer.invoke('chat:send', payload),
+  streamChat: (payload: { sessionId: string; messages: any[] }) =>
+    ipcRenderer.invoke('chat:stream', payload),
   onStreamChunk: (callback: (chunk: string) => void) => {
     ipcRenderer.on('chat:stream:chunk', (_event, chunk: string) => callback(chunk));
   },
   removeStreamListener: () => {
     ipcRenderer.removeAllListeners('chat:stream:chunk');
+  },
+  onStreamDone: (callback: () => void) => {
+    ipcRenderer.once('chat:stream:done', () => callback());
+  },
+  onStreamError: (callback: (error: string) => void) => {
+    ipcRenderer.once('chat:stream:error', (_event, error: string) => callback(error));
   },
   createSession: (stageId: string) =>
     ipcRenderer.invoke('session:create', stageId),

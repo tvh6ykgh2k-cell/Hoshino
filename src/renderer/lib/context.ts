@@ -1,5 +1,5 @@
 import type { Persona, Stage, TopicProgress, ChatMessage } from '../../shared/types';
-import { RECENT_MESSAGES_KEEP } from '../../shared/constants';
+import { RECENT_MESSAGES_KEEP, COMPRESSION_THRESHOLD } from '../../shared/constants';
 
 export function buildSystemPrompt(
   persona: Persona | undefined,
@@ -69,6 +69,12 @@ function getStyleInstruction(style: string): string {
 
 export function compressHistory(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length <= RECENT_MESSAGES_KEEP) {
+    return messages;
+  }
+
+  // Check if we actually need compression
+  const totalTokens = estimateTokens(messages.map(m => m.content).join(' '));
+  if (totalTokens < COMPRESSION_THRESHOLD) {
     return messages;
   }
 

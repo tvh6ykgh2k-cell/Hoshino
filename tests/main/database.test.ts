@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// Mock electron before importing database module
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => ':memory:',
+  },
+}));
+
 import { getDatabase, closeDatabase } from '../../src/main/database';
 import Database from 'better-sqlite3';
 

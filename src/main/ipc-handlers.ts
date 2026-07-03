@@ -1,10 +1,11 @@
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow, safeStorage, app } from 'electron';
 import { getDatabase } from './database';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { Persona, TopicProgress, ChatSession } from '../shared/types';
 import fs from 'fs';
 import path from 'path';
 import { readNote, writeNote, scanVault } from './obsidian-bridge';
+import { streamChatResponse, buildSystemPromptMain } from './llm-service';
 
 export function registerIpcHandlers(): void {
   const db = getDatabase();
@@ -47,6 +48,53 @@ export function registerIpcHandlers(): void {
     return { messageId: userMsgId };
   });
 
+  ipcMain.handle(IPC_CHANNELS.CHAT_STREAM, async (event, payload: { sessionId: string; messages: any[] }) => {
+    const personaRow = db.prepare("SELECT * FROM persona WHERE id = 'active'").get() as any;
+    const persona = personaRow ? {
+      name: personaRow.name,
+      teachingStyle: personaRow.teaching_style,
+      language: personaRow.language,
+      tone: personaRow.tone,
+      roleDescription: personaRow.role_description,
+      template: personaRow.template,
+    } : null;
+
+    const progressRows = db.prepare('SELECT * FROM progress').all() as any[];
+    const progress = progressRows.map((r: any) => ({
+      topicId: r.topic_id,
+      status: r.status,
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+      score: r.score,
+      notes: r.notes,
+    }));
+
+    // Get API key from settings
+    const apiKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'apiKey'").get() as { value: string } | undefined;
+    if (!apiKeyRow?.value) {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      window?.webContents.send('chat:stream:error', '请先在设置中配置 API Key');
+      return;
+    }
+
+    // Decrypt API key if encrypted with safeStorage
+    let apiKey = apiKeyRow.value;
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        apiKey = safeStorage.decryptString(Buffer.from(apiKeyRow.value, 'base64'));
+      } catch {
+        // fallback for unencrypted values
+      }
+    }
+
+    const systemPrompt = buildSystemPromptMain(persona, null, progress);
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return;
+
+    await streamChatResponse(window, payload.sessionId, payload.messages, apiKey, systemPrompt);
+  });
+
   // === Progress ===
   ipcMain.handle(IPC_CHANNELS.PROGRESS_GET, (): TopicProgress[] => {
     const rows = db.prepare('SELECT * FROM progress').all() as any[];
@@ -75,9 +123,14 @@ export function registerIpcHandlers(): void {
 
   // === Curriculum ===
   ipcMain.handle(IPC_CHANNELS.CURRICULUM_LOAD, () => {
-    const dataPath = path.join(__dirname, '..', '..', 'data', 'curriculum.json');
+    const dataPath = path.join(app.getAppPath(), 'data', 'curriculum.json');
     if (fs.existsSync(dataPath)) {
       return JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+    }
+    // Fallback for dev mode
+    const devPath = path.join(__dirname, '..', '..', '..', 'data', 'curriculum.json');
+    if (fs.existsSync(devPath)) {
+      return JSON.parse(fs.readFileSync(devPath, 'utf-8'));
     }
     return [];
   });
@@ -107,7 +160,15 @@ export function registerIpcHandlers(): void {
     const rows = db.prepare('SELECT * FROM settings').all() as { key: string; value: string }[];
     const result: Record<string, string> = {};
     for (const r of rows) {
-      result[r.key] = r.value;
+      if (r.key === 'apiKey' && safeStorage.isEncryptionAvailable()) {
+        try {
+          result[r.key] = safeStorage.decryptString(Buffer.from(r.value, 'base64'));
+        } catch {
+          result[r.key] = r.value; // fallback for unencrypted values
+        }
+      } else {
+        result[r.key] = r.value;
+      }
     }
     return result;
   });
@@ -115,7 +176,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, (_event, settings: Record<string, string>) => {
     const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     for (const [key, value] of Object.entries(settings)) {
-      stmt.run(key, value);
+      if (key === 'apiKey' && safeStorage.isEncryptionAvailable() && value) {
+        const encrypted = safeStorage.encryptString(value).toString('base64');
+        stmt.run(key, encrypted);
+      } else {
+        stmt.run(key, value);
+      }
     }
   });
 
