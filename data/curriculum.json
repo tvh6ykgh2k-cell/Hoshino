@@ -1,0 +1,260 @@
+[
+  {
+    "id": "stage-0",
+    "order": 0,
+    "title": "Agent 认知",
+    "description": "理解 Agent 的本质——它和 chatbot、workflow 到底有什么不同",
+    "prerequisites": [],
+    "projectName": "认知笔记",
+    "projectDescription": "写一页笔记：为什么你的场景需要 Agent",
+    "modules": [
+      {
+        "id": "s0-m1",
+        "title": "概念区分",
+        "description": "区分 chatbot、workflow、agent、multi-agent",
+        "topics": [
+          {
+            "id": "s0-t1",
+            "title": "Chatbot vs Agent",
+            "content": "Chatbot 是单轮问答，Agent 是自主决策循环。Agent 的核心是 observe→think→act→observe 的闭环。",
+            "keyConcepts": ["stateless vs stateful", "reactive vs proactive", "single-turn vs multi-turn"],
+            "exercises": ["举3个只能用Agent不能用chatbot解决的场景"]
+          },
+          {
+            "id": "s0-t2",
+            "title": "Workflow vs Agent",
+            "content": "Workflow 是预设的 DAG，Agent 是动态决策树。Workflow 的路径是固定的，Agent 的路径是模型在运行时选择的。",
+            "keyConcepts": ["DAG vs decision tree", "deterministic vs stochastic", "when to use which"],
+            "exercises": ["分析一个现有系统，判断它应该是workflow还是agent"]
+          },
+          {
+            "id": "s0-t3",
+            "title": "Multi-Agent 概念",
+            "content": "当单个 Agent 的能力边界不足以完成任务时，多个 Agent 通过分工协作来解决问题。",
+            "keyConcepts": ["specialization", "handoff", "supervisor pattern", "emergent behavior"],
+            "exercises": ["设计一个multi-agent系统的角色分工"]
+          }
+        ]
+      },
+      {
+        "id": "s0-m2",
+        "title": "Agent 应用场景",
+        "description": "了解 Agent 在真实世界中的应用",
+        "topics": [
+          {
+            "id": "s0-t4",
+            "title": "Coding Agent 剖析",
+            "content": "以 Claude Code / Codex 为例，理解 coding agent 的架构：文件系统操作、shell 执行、git 集成、权限控制。",
+            "keyConcepts": ["file operations", "shell sandbox", "permission tiers", "context management"],
+            "exercises": ["画一张Claude Code的架构图，标注每个模块的职责"]
+          },
+          {
+            "id": "s0-t5",
+            "title": "Research Agent 剖析",
+            "content": "以 Deep Research 为例，理解 research agent 的工作流：搜索→阅读→提取→综合→验证。",
+            "keyConcepts": ["web search", "content extraction", "fact verification", "citation"],
+            "exercises": ["手写一个research agent的prompt chain"]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "stage-1",
+    "order": 1,
+    "title": "最小 Agent",
+    "description": "从零构建一个 50-150 行的最小 Agent，理解 Agent Loop 的核心机制",
+    "prerequisites": ["stage-0"],
+    "projectName": "最小 Agent",
+    "projectDescription": "构建一个 50-150 行的最小 Agent，包含 observe→think→act→observe 循环",
+    "modules": [
+      {
+        "id": "s1-m1",
+        "title": "Agent Loop 核心",
+        "description": "理解并实现 Agent 的核心循环",
+        "topics": [
+          {
+            "id": "s1-t1",
+            "title": "Agent Loop 四步法",
+            "content": "observe（观察环境状态）→ think（推理下一步行动）→ act（执行工具调用）→ observe（观察结果）。这是所有 Agent 的基础。",
+            "keyConcepts": ["observe", "think/reason", "act/tool-use", "feedback loop"],
+            "exercises": ["用不超过50行Python实现一个最小Agent Loop"]
+          },
+          {
+            "id": "s1-t2",
+            "title": "停止条件设计",
+            "content": "Agent 不能无限循环。需要设计停止条件：最大步数、任务完成判定、超时、用户中断。",
+            "keyConcepts": ["max_steps", "task_completion_signal", "timeout", "human-in-the-loop"],
+            "exercises": ["给最小Agent Loop添加3种停止条件"]
+          },
+          {
+            "id": "s1-t3",
+            "title": "结构化输出",
+            "content": "让 LLM 输出结构化数据（JSON/tool_call）而非自由文本，是实现可靠 Agent 的关键。",
+            "keyConcepts": ["JSON mode", "function calling", "schema validation", "retry on parse error"],
+            "exercises": ["实现一个带schema校验的工具调用解析器"]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "stage-2",
+    "order": 2,
+    "title": "工具与知识",
+    "description": "掌握 Tool Use、RAG、Memory 三大核心能力，构建一个资料研究助手",
+    "prerequisites": ["stage-1"],
+    "projectName": "资料研究助手",
+    "projectDescription": "构建一个能搜索、阅读、引用资料的研究助手 Agent",
+    "modules": [
+      {
+        "id": "s2-m1",
+        "title": "Tool Use 深度",
+        "description": "工具的设计、注册、调用、错误处理",
+        "topics": [
+          {
+            "id": "s2-t1",
+            "title": "Tool Schema 设计",
+            "content": "工具的 name、description、parameters 决定了 LLM 能否正确选择和使用工具。description 比 name 更重要。",
+            "keyConcepts": ["tool description engineering", "parameter schema", "tool selection accuracy", "tool naming conventions"],
+            "exercises": ["设计3个工具，写出它们的schema，然后交换让同伴判断每个工具的使用场景"]
+          },
+          {
+            "id": "s2-t2",
+            "title": "工具调用失败处理",
+            "content": "工具调用可能因为网络、权限、格式等问题失败。Agent 需要 fallback 策略：重试、降级、报告。",
+            "keyConcepts": ["retry with backoff", "graceful degradation", "error taxonomy", "user escalation"],
+            "exercises": ["给工具调用添加指数退避重试+降级策略"]
+          }
+        ]
+      },
+      {
+        "id": "s2-m2",
+        "title": "RAG 基础",
+        "description": "检索增强生成的完整 pipeline",
+        "topics": [
+          {
+            "id": "s2-t3",
+            "title": "RAG Pipeline",
+            "content": "文档解析 → 分块 → Embedding → 向量存储 → 检索 → Rerank → 生成。每一步都有设计选择。",
+            "keyConcepts": ["chunking strategy", "embedding model choice", "vector DB", "retrieval quality", "citation"],
+            "exercises": ["搭建一个最小RAG系统，对比不同chunk大小对检索质量的影响"]
+          }
+        ]
+      },
+      {
+        "id": "s2-m3",
+        "title": "Memory 系统",
+        "description": "Agent 如何记住和遗忘",
+        "topics": [
+          {
+            "id": "s2-t4",
+            "title": "三层 Memory 架构",
+            "content": "Working Memory（当前对话）→ Episodic Memory（历史会话摘要）→ Semantic Memory（长期知识）。",
+            "keyConcepts": ["working memory", "episodic memory", "semantic memory", "memory decay", "retrieval strategy"],
+            "exercises": ["实现一个带工作记忆和情景记忆的Agent"]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "stage-3",
+    "order": 3,
+    "title": "Agent Harness",
+    "description": "构建可调试、可观测、可控制的 Agent 运行框架",
+    "prerequisites": ["stage-2"],
+    "projectName": "可调试的 Harness Demo",
+    "projectDescription": "构建一个带有工具注册、权限分级、日志追踪、成本控制的 Agent Harness",
+    "modules": [
+      {
+        "id": "s3-m1",
+        "title": "Harness 核心组件",
+        "description": "Agent 运行时的基础设施",
+        "topics": [
+          {
+            "id": "s3-t1",
+            "title": "工具注册与权限",
+            "content": "工具的统一注册机制 + 三级权限模型：只读、写入确认、始终确认。MCP 协议和 Skills 的概念。",
+            "keyConcepts": ["tool registry", "permission tiers", "MCP", "Skills", "tool discovery"],
+            "exercises": ["实现一个工具注册表，支持MCP协议的tool/list和tool/call"]
+          },
+          {
+            "id": "s3-t2",
+            "title": "状态管理与会话",
+            "content": "Agent 的会话状态管理：session lifecycle、状态持久化、replay 能力。",
+            "keyConcepts": ["session state", "checkpoint", "replay", "resume"],
+            "exercises": ["给Agent添加checkpoint/replay功能"]
+          },
+          {
+            "id": "s3-t3",
+            "title": "上下文工程实践",
+            "content": "System prompt → long-term memory → short-term memory → current turn。信息在正确时间以正确格式进入模型。",
+            "keyConcepts": ["context layering", "context budget", "cache-friendly structure", "model routing"],
+            "exercises": ["设计一个4层上下文架构，并测试不同预算下的Agent表现"]
+          }
+        ]
+      },
+      {
+        "id": "s3-m2",
+        "title": "可观测性与可靠性",
+        "description": "让 Agent 的行为可追踪、可审计",
+        "topics": [
+          {
+            "id": "s3-t4",
+            "title": "Trace 与日志",
+            "content": "每次工具调用、每次 LLM 请求、每次状态变更都要记录。OpenTelemetry 风格的 trace。",
+            "keyConcepts": ["trace spans", "tool call logging", "token usage tracking", "cost monitoring"],
+            "exercises": ["给Agent添加完整的trace日志，包括每步的耗时和token消耗"]
+          },
+          {
+            "id": "s3-t5",
+            "title": "可靠性六件套",
+            "content": "idempotency、timeout、retry、cost guard、permission tier、observability——生产级 Agent 的基本要求。",
+            "keyConcepts": ["idempotency key", "circuit breaker", "cost ceiling", "sandbox"],
+            "exercises": ["为Agent逐个添加可靠性六件套中的每一项"]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "stage-4",
+    "order": 4,
+    "title": "Multi-Agent 系统",
+    "description": "设计多 Agent 协作系统，掌握 planner/executor/reviewer/router 模式",
+    "prerequisites": ["stage-3"],
+    "projectName": "Research→Write→Review 系统",
+    "projectDescription": "构建一个 research→write→review 三阶段 Multi-Agent 协作系统",
+    "modules": [
+      {
+        "id": "s4-m1",
+        "title": "Multi-Agent 模式",
+        "description": "常见的多 Agent 协作架构",
+        "topics": [
+          {
+            "id": "s4-t1",
+            "title": "Supervisor 模式",
+            "content": "一个 supervisor agent 负责分解任务、分派给 worker agents、汇总结果。类似项目经理的角色。",
+            "keyConcepts": ["task decomposition", "worker assignment", "result aggregation", "supervisor loop"],
+            "exercises": ["实现一个supervisor+2 worker的最小Multi-Agent系统"]
+          },
+          {
+            "id": "s4-t2",
+            "title": "Handoff 与 Router",
+            "content": "Agent 之间的任务移交机制。Router 根据请求类型将任务路由到专精 Agent。",
+            "keyConcepts": ["agent handoff", "intent routing", "capability declaration", "fallback agent"],
+            "exercises": ["实现一个带router的Multi-Agent系统，支持3种不同类型的请求"]
+          },
+          {
+            "id": "s4-t3",
+            "title": "Reviewer 模式",
+            "content": "generator → reviewer → reviser 的协作流水线。Reviewer 提供批判性反馈，Reviser 根据反馈改进。",
+            "keyConcepts": ["adversarial review", "feedback loop", "quality gate", "iteration budget"],
+            "exercises": ["实现一个generate→review→revise→finalize的4步流水线"]
+          }
+        ]
+      }
+    ]
+  }
+]
