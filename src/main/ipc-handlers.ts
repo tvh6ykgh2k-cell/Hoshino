@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../shared/constants';
 import type { Persona, TopicProgress, ChatSession } from '../shared/types';
 import fs from 'fs';
 import path from 'path';
+import { readNote, writeNote, scanVault } from './obsidian-bridge';
 
 export function registerIpcHandlers(): void {
   const db = getDatabase();
@@ -118,8 +119,22 @@ export function registerIpcHandlers(): void {
     }
   });
 
-  // === Obsidian Vault (stubs -- implemented in Task 4.2) ===
-  ipcMain.handle(IPC_CHANNELS.VAULT_SCAN, () => []);
-  ipcMain.handle(IPC_CHANNELS.VAULT_READ, (_event, _relativePath: string) => null);
-  ipcMain.handle(IPC_CHANNELS.VAULT_WRITE, (_event, _relativePath: string, _content: string) => {});
+  // === Obsidian Vault ===
+  ipcMain.handle(IPC_CHANNELS.VAULT_SCAN, () => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'vaultPath'").get() as { value: string } | undefined;
+    if (!row?.value) return [];
+    return scanVault(row.value);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VAULT_READ, (_event, relativePath: string) => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'vaultPath'").get() as { value: string } | undefined;
+    if (!row?.value) return null;
+    return readNote(row.value, relativePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VAULT_WRITE, (_event, relativePath: string, content: string) => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'vaultPath'").get() as { value: string } | undefined;
+    if (!row?.value) return;
+    writeNote(row.value, relativePath, content);
+  });
 }

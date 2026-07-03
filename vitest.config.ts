@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   root: '.',
   test: {
-    include: ['tests/renderer/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+    include: ['tests/renderer/**/*.{test,spec}.?(c|m)[jt]s?(x)', 'tests/main/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
   },
   resolve: {
     alias: {
