@@ -1,0 +1,19 @@
+appId: com.hoshino.app
+productName: Hoshino
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - data/**/*
+  - node_modules/**/*
+  - package.json
+win:
+  target: nsis
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+extraResources:
+  - from: data/
+    to: data/
