@@ -2,8 +2,56 @@ import { BrowserWindow } from 'electron';
 import OpenAI from 'openai';
 import type { ChatMessage, Persona, Stage, TopicProgress } from '../shared/types';
 import { getDatabase } from './database';
+import { MAX_CONTEXT_TOKENS } from '../shared/constants';
 
-// This handles the LLM call + streaming from the main process
+// ── Provider 配置 ──────────────────────────────────────────────────
+
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  deepseek: 'https://api.deepseek.com',
+  claude: 'https://api.anthropic.com',
+  ollama: 'http://localhost:11434/v1',
+};
+
+function getProviderConfig(): { model: string; baseURL: string } {
+  const db = getDatabase();
+  const modelRow = db.prepare("SELECT value FROM settings WHERE key = 'model'").get() as { value: string } | undefined;
+  const providerRow = db.prepare("SELECT value FROM settings WHERE key = 'provider'").get() as { value: string } | undefined;
+  const model = modelRow?.value || 'deepseek-chat';
+  const provider = providerRow?.value || 'deepseek';
+  const baseURL = PROVIDER_BASE_URLS[provider] || PROVIDER_BASE_URLS.deepseek;
+  return { model, baseURL };
+}
+
+// ── 上下文窗口管理 ──────────────────────────────────────────────────
+
+export function estimateTokens(text: string): number {
+  // 中文/日文混合文本的保守估算：约 1.5 字符/token
+  return Math.ceil(text.length / 1.5);
+}
+
+function enforceTokenBudget(
+  systemPrompt: string,
+  messages: ChatMessage[],
+  maxTokens: number = MAX_CONTEXT_TOKENS
+): ChatMessage[] {
+  const systemTokens = estimateTokens(systemPrompt);
+  let budget = maxTokens - systemTokens;
+  if (budget <= 0) return [];
+
+  const result: ChatMessage[] = [];
+  // 从最新消息开始保留，直到用完 token 预算
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msgTokens = estimateTokens(messages[i].content);
+    if (budget - msgTokens < 0) break;
+    result.unshift(messages[i]);
+    budget -= msgTokens;
+  }
+
+  return result;
+}
+
+// ── LLM 调用 + 流式响应 ────────────────────────────────────────────
+
 export async function streamChatResponse(
   window: BrowserWindow,
   sessionId: string,
@@ -11,29 +59,25 @@ export async function streamChatResponse(
   apiKey: string,
   systemPrompt: string
 ): Promise<void> {
+  const { model, baseURL } = getProviderConfig();
+
   const client = new OpenAI({
     apiKey,
-    baseURL: 'https://api.deepseek.com',
+    baseURL,
   });
 
+  // 上下文窗口裁剪
+  const trimmedMessages = enforceTokenBudget(systemPrompt, messages);
+
   const systemMsg = { role: 'system' as const, content: systemPrompt };
-  const chatMessages = [systemMsg, ...messages.map(m => ({
+  const chatMessages = [systemMsg, ...trimmedMessages.map(m => ({
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }))] as any;
 
-  // Save user message to DB
-  const db = getDatabase();
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-  if (lastUserMsg) {
-    const userMsgId = `msg-${Date.now()}-user`;
-    db.prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)')
-      .run(userMsgId, sessionId, 'user', lastUserMsg.content);
-  }
-
   try {
     const stream = await client.chat.completions.create({
-      model: 'deepseek-chat',
+      model,
       messages: chatMessages,
       stream: true,
     });
@@ -47,7 +91,8 @@ export async function streamChatResponse(
       }
     }
 
-    // Save assistant message to DB
+    // 仅保存 assistant 消息（user 消息由 CHAT_SEND handler 负责）
+    const db = getDatabase();
     const assistantMsgId = `msg-${Date.now()}-assistant`;
     db.prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)')
       .run(assistantMsgId, sessionId, 'assistant', fullContent);
@@ -58,7 +103,8 @@ export async function streamChatResponse(
   }
 }
 
-// Build system prompt in main process (mirrors renderer's context.ts logic)
+// ── System Prompt 构建 ──────────────────────────────────────────────
+
 export function buildSystemPromptMain(
   persona: Persona | null,
   currentStage: Stage | null,
@@ -76,24 +122,35 @@ export function buildSystemPromptMain(
   const lines: string[] = [];
   lines.push(`# 你的身份\n${p.roleDescription}`);
   lines.push(`\n## 教学风格\n${getStyleInstruction(p.teachingStyle)}`);
+  lines.push(`\n## 语气\n${p.tone}`);
   lines.push(`\n## 语言\n${p.language}`);
 
+  // 当前课程阶段
   if (currentStage) {
     lines.push(`\n# 当前课程阶段`);
     lines.push(`Stage ${currentStage.order}: ${currentStage.title}`);
     lines.push(`${currentStage.description}`);
-    for (const mod of currentStage.modules) {
-      lines.push(`- ${mod.title}: ${mod.description}`);
-      for (const topic of mod.topics) {
-        lines.push(`  - ${topic.id}: ${topic.title}`);
+    // 只列出模块和主题名，不展开内容以控制 prompt 长度
+    if (currentStage.modules) {
+      for (const mod of currentStage.modules) {
+        lines.push(`- ${mod.title}`);
+        if (mod.topics) {
+          for (const topic of mod.topics) {
+            lines.push(`  - ${topic.id}: ${topic.title}`);
+          }
+        }
       }
     }
   }
 
+  // 学生学习进度
   if (progress.length > 0) {
     lines.push(`\n# 学生学习进度`);
     for (const prog of progress) {
-      const emoji = prog.status === 'mastered' ? '✅' : prog.status === 'weak' ? '⚠️' : prog.status === 'in_progress' ? '📖' : '🔒';
+      const emoji = prog.status === 'mastered' ? '✅'
+        : prog.status === 'weak' ? '⚠️'
+        : prog.status === 'in_progress' ? '📖'
+        : '🔒';
       lines.push(`${emoji} ${prog.topicId}: ${prog.status}${prog.score != null ? ` (评分: ${prog.score})` : ''}`);
     }
   }
@@ -101,6 +158,8 @@ export function buildSystemPromptMain(
   lines.push(`\n# 教学规则`);
   lines.push(`- 一次只教一个概念，确保学生理解后再推进`);
   lines.push(`- 当学生提问时，先判断是否与当前学习内容相关`);
+  lines.push(`- 多举代码实例，让学生在实践中理解`);
+  lines.push(`- 在新概念讲解前，先关联学生已有的知识`);
 
   return lines.join('\n');
 }

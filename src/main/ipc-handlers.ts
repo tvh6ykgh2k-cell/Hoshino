@@ -1,11 +1,57 @@
 import { ipcMain, BrowserWindow, safeStorage, app } from 'electron';
 import { getDatabase } from './database';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { Persona, TopicProgress, ChatSession } from '../shared/types';
+import type { Persona, TopicProgress, ChatSession, Stage } from '../shared/types';
 import fs from 'fs';
 import path from 'path';
 import { readNote, writeNote, scanVault } from './obsidian-bridge';
 import { streamChatResponse, buildSystemPromptMain } from './llm-service';
+
+// ── 辅助：加载 curriculum 并查找 stage ──────────────────────────────
+
+function loadStage(stageId: string): Stage | null {
+  const dataPath = path.join(app.getAppPath(), 'data', 'curriculum.json');
+  let dataPath2 = path.join(__dirname, '..', '..', '..', 'data', 'curriculum.json');
+  const actualPath = fs.existsSync(dataPath) ? dataPath : dataPath2;
+  if (!fs.existsSync(actualPath)) return null;
+
+  const stages: Stage[] = JSON.parse(fs.readFileSync(actualPath, 'utf-8'));
+  return stages.find(s => s.id === stageId) || null;
+}
+
+// ── 辅助：解析 persona ──────────────────────────────────────────────
+
+function getPersona(): Persona | null {
+  const db = getDatabase();
+  const row = db.prepare("SELECT * FROM persona WHERE id = 'active'").get() as any;
+  if (!row) return null;
+  return {
+    name: row.name,
+    teachingStyle: row.teaching_style,
+    language: row.language,
+    tone: row.tone,
+    roleDescription: row.role_description,
+    template: row.template,
+  };
+}
+
+// ── 辅助：获取并解密 API key ─────────────────────────────────────────
+
+function getApiKey(): string | null {
+  const db = getDatabase();
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'apiKey'").get() as { value: string } | undefined;
+  if (!row?.value) return null;
+
+  let apiKey = row.value;
+  if (safeStorage.isEncryptionAvailable()) {
+    try {
+      apiKey = safeStorage.decryptString(Buffer.from(row.value, 'base64'));
+    } catch { /* fallback for unencrypted values */ }
+  }
+  return apiKey;
+}
+
+// ── 注册所有 IPC handlers ───────────────────────────────────────────
 
 export function registerIpcHandlers(): void {
   const db = getDatabase();
@@ -49,16 +95,10 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM, async (event, payload: { sessionId: string; messages: any[] }) => {
-    const personaRow = db.prepare("SELECT * FROM persona WHERE id = 'active'").get() as any;
-    const persona = personaRow ? {
-      name: personaRow.name,
-      teachingStyle: personaRow.teaching_style,
-      language: personaRow.language,
-      tone: personaRow.tone,
-      roleDescription: personaRow.role_description,
-      template: personaRow.template,
-    } : null;
+    // 1. 获取 persona
+    const persona = getPersona();
 
+    // 2. 获取进度
     const progressRows = db.prepare('SELECT * FROM progress').all() as any[];
     const progress = progressRows.map((r: any) => ({
       topicId: r.topic_id,
@@ -69,30 +109,40 @@ export function registerIpcHandlers(): void {
       notes: r.notes,
     }));
 
-    // Get API key from settings
-    const apiKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'apiKey'").get() as { value: string } | undefined;
-    if (!apiKeyRow?.value) {
+    // 3. 获取当前 stage（根据 session 的 stageId）
+    const sessionRow = db.prepare("SELECT stage_id FROM sessions WHERE id = ?").get(payload.sessionId) as { stage_id: string } | undefined;
+    const currentStage = sessionRow ? loadStage(sessionRow.stage_id) : null;
+
+    // 4. 获取 API key
+    const apiKey = getApiKey();
+    if (!apiKey) {
       const window = BrowserWindow.fromWebContents(event.sender);
       window?.webContents.send('chat:stream:error', '请先在设置中配置 API Key');
       return;
     }
 
-    // Decrypt API key if encrypted with safeStorage
-    let apiKey = apiKeyRow.value;
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        apiKey = safeStorage.decryptString(Buffer.from(apiKeyRow.value, 'base64'));
-      } catch {
-        // fallback for unencrypted values
-      }
-    }
-
-    const systemPrompt = buildSystemPromptMain(persona, null, progress);
+    // 5. 构建 system prompt（现在传入了 stage）
+    const systemPrompt = buildSystemPromptMain(persona, currentStage, progress);
 
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return;
 
     await streamChatResponse(window, payload.sessionId, payload.messages, apiKey, systemPrompt);
+  });
+
+  // === Messages (加载会话历史) ===
+  ipcMain.handle(IPC_CHANNELS.MESSAGES_GET_BY_SESSION, (_event, sessionId: string) => {
+    const rows = db.prepare(
+      'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+    ).all(sessionId) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      sessionId: r.session_id,
+      role: r.role,
+      content: r.content,
+      createdAt: r.created_at,
+      tokenCount: r.token_count,
+    }));
   });
 
   // === Progress ===
@@ -127,7 +177,6 @@ export function registerIpcHandlers(): void {
     if (fs.existsSync(dataPath)) {
       return JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
     }
-    // Fallback for dev mode
     const devPath = path.join(__dirname, '..', '..', '..', 'data', 'curriculum.json');
     if (fs.existsSync(devPath)) {
       return JSON.parse(fs.readFileSync(devPath, 'utf-8'));
@@ -137,16 +186,7 @@ export function registerIpcHandlers(): void {
 
   // === Persona ===
   ipcMain.handle(IPC_CHANNELS.PERSONA_GET, (): Persona | null => {
-    const row = db.prepare("SELECT * FROM persona WHERE id = 'active'").get() as any;
-    if (!row) return null;
-    return {
-      name: row.name,
-      teachingStyle: row.teaching_style,
-      language: row.language,
-      tone: row.tone,
-      roleDescription: row.role_description,
-      template: row.template,
-    };
+    return getPersona();
   });
 
   ipcMain.handle(IPC_CHANNELS.PERSONA_SET, (_event, persona: Persona) => {
@@ -164,7 +204,7 @@ export function registerIpcHandlers(): void {
         try {
           result[r.key] = safeStorage.decryptString(Buffer.from(r.value, 'base64'));
         } catch {
-          result[r.key] = r.value; // fallback for unencrypted values
+          result[r.key] = r.value;
         }
       } else {
         result[r.key] = r.value;

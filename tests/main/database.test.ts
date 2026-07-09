@@ -7,13 +7,13 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { getDatabase, closeDatabase } from '../../src/main/database';
-import Database from 'better-sqlite3';
+import { getDatabase, closeDatabase, Database, initSqlJsRuntime } from '../../src/main/database';
 
 describe('database', () => {
-  let db: Database.Database;
+  let db: Database;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    await initSqlJsRuntime();
     db = getDatabase(':memory:');
   });
 

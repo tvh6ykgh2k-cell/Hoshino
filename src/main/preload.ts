@@ -34,6 +34,8 @@ const electronAPI = {
     ipcRenderer.invoke('vault:write', relativePath, content),
   scanVault: () =>
     ipcRenderer.invoke('vault:scan'),
+  getMessagesBySession: (sessionId: string) =>
+    ipcRenderer.invoke('messages:getBySession', sessionId),
   getPersona: () =>
     ipcRenderer.invoke('persona:get'),
   setPersona: (persona: unknown) =>

@@ -1,4 +1,4 @@
-import type { Persona, AppSettings, Stage, TopicProgress, TopicStatus, ChatSession } from '../../shared/types';
+import type { Persona, AppSettings, Stage, TopicProgress, TopicStatus, ChatSession, ChatMessage } from '../../shared/types';
 
 declare global {
   interface Window {
@@ -17,6 +17,7 @@ declare global {
       readVault: (relativePath: string) => Promise<string>;
       writeVault: (relativePath: string, content: string) => Promise<void>;
       scanVault: () => Promise<string[]>;
+      getMessagesBySession: (sessionId: string) => Promise<ChatMessage[]>;
       getPersona: () => Promise<Persona>;
       setPersona: (persona: Persona) => Promise<void>;
       getSettings: () => Promise<AppSettings>;
@@ -50,6 +51,8 @@ export const api = {
     window.electronAPI.writeVault(path, content),
   scanVault: () =>
     window.electronAPI.scanVault(),
+  getMessagesBySession: (sessionId: string) =>
+    window.electronAPI.getMessagesBySession(sessionId),
   getPersona: () =>
     window.electronAPI.getPersona(),
   setPersona: (persona: Persona) =>

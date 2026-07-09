@@ -1,9 +1,92 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database as SqlJsDatabase, SqlJsStatic } from 'sql.js';
+import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { DB_PATH } from '../shared/constants';
 
-let db: Database.Database | null = null;
+let SQL: SqlJsStatic | null = null;
+
+/** 必须在 app ready 后、任何数据库操作前调用一次 */
+export async function initSqlJsRuntime(): Promise<void> {
+  SQL = await initSqlJs();
+}
+
+// ── wrapper 层：把 sql.js 包裹成 better-sqlite3 风格的同步 API ──────
+
+class Statement {
+  constructor(
+    private db: SqlJsDatabase,
+    private sql: string,
+  ) {}
+
+  all(...params: unknown[]): Record<string, unknown>[] {
+    const stmt = this.db.prepare(this.sql);
+    if (params.length > 0) stmt.bind(params as any);
+    const rows: Record<string, unknown>[] = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as Record<string, unknown>);
+    }
+    stmt.free();
+    return rows;
+  }
+
+  get(...params: unknown[]): Record<string, unknown> | undefined {
+    const stmt = this.db.prepare(this.sql);
+    if (params.length > 0) stmt.bind(params as any);
+    const row = stmt.step() ? (stmt.getAsObject() as Record<string, unknown>) : undefined;
+    stmt.free();
+    return row;
+  }
+
+  run(...params: unknown[]): { changes: number; lastInsertRowid: number } {
+    const stmt = this.db.prepare(this.sql);
+    if (params.length > 0) stmt.bind(params as any);
+    stmt.step();
+    const changes = this.db.getRowsModified();
+    stmt.free();
+    // sql.js doesn't expose lastInsertRowid natively — use SQL trick
+    const row = this.db.exec('SELECT last_insert_rowid() AS id');
+    const lastInsertRowid = Number(row[0]?.values?.[0]?.[0] ?? 0);
+    return { changes, lastInsertRowid };
+  }
+}
+
+export class Database {
+  private db: SqlJsDatabase;
+  private filePath: string;
+
+  constructor(db: SqlJsDatabase, filePath: string) {
+    this.db = db;
+    this.filePath = filePath;
+  }
+
+  exec(sql: string): void {
+    this.db.run(sql);
+  }
+
+  pragma(pragmaStr: string): void {
+    this.db.run(`PRAGMA ${pragmaStr}`);
+  }
+
+  prepare(sql: string): Statement {
+    return new Statement(this.db, sql);
+  }
+
+  close(): void {
+    const data = this.db.export();
+    // :memory: 等特殊路径不落盘
+    if (!this.filePath.startsWith(':')) {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.filePath, Buffer.from(data));
+    }
+    this.db.close();
+  }
+}
+
+// ── 单例 ─────────────────────────────────────────────────────────
+
+let db: Database | null = null;
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS persona (
@@ -58,11 +141,22 @@ const MIGRATIONS = [
   )`,
 ];
 
-export function getDatabase(dbPath?: string): Database.Database {
+export function getDatabase(dbPath?: string): Database {
   if (db) return db;
+  if (!SQL) throw new Error('sql.js 未初始化，请先调用 initSqlJsRuntime()');
 
   const resolvedPath = dbPath || path.join(app.getPath('userData'), DB_PATH);
-  db = new Database(resolvedPath);
+
+  // 从磁盘加载已有数据库，否则创建新的
+  let sqlDb: SqlJsDatabase;
+  if (fs.existsSync(resolvedPath)) {
+    const buffer = fs.readFileSync(resolvedPath);
+    sqlDb = new SQL.Database(buffer);
+  } else {
+    sqlDb = new SQL.Database();
+  }
+
+  db = new Database(sqlDb, resolvedPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
