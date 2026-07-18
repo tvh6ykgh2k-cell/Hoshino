@@ -1,6 +1,8 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, clipboard } from 'electron';
 
 const electronAPI = {
+  // Clipboard
+  readClipboard: () => clipboard.readText(),
   // Channel strings must match IPC_CHANNELS in src/shared/constants.ts
   sendMessage: (payload: { sessionId: string; content: string }) =>
     ipcRenderer.invoke('chat:send', payload),
@@ -36,6 +38,10 @@ const electronAPI = {
     ipcRenderer.invoke('vault:scan'),
   getMessagesBySession: (sessionId: string) =>
     ipcRenderer.invoke('messages:getBySession', sessionId),
+  summarizeSession: (sessionId: string) =>
+    ipcRenderer.invoke('session:summarize', sessionId),
+  captureSave: (rawText: string) =>
+    ipcRenderer.invoke('capture:save', rawText),
   getPersona: () =>
     ipcRenderer.invoke('persona:get'),
   setPersona: (persona: unknown) =>

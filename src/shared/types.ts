@@ -116,7 +116,7 @@ export interface ObsidianNote {
 export interface AppSettings {
   vaultPath: string;
   apiKey: string;
-  provider: 'deepseek' | 'claude' | 'ollama';
+  provider: 'deepseek' | 'claude' | 'ollama' | 'agnes';
   model: string;
   persona: Persona;
 }

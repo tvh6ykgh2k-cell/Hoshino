@@ -13,8 +13,46 @@ export async function initSqlJsRuntime(): Promise<void> {
 
 // ── wrapper 层：把 sql.js 包裹成 better-sqlite3 风格的同步 API ──────
 
+export class Database {
+  private db: SqlJsDatabase;
+  private filePath: string;
+
+  constructor(db: SqlJsDatabase, filePath: string) {
+    this.db = db;
+    this.filePath = filePath;
+  }
+
+  exec(sql: string): void {
+    this.db.run(sql);
+    this.saveToDisk();
+  }
+
+  pragma(pragmaStr: string): void {
+    this.db.run(`PRAGMA ${pragmaStr}`);
+  }
+
+  prepare(sql: string): Statement {
+    return new Statement(this, this.db, sql);
+  }
+
+  /** 立即将数据写到磁盘 */
+  saveToDisk(): void {
+    if (this.filePath.startsWith(':')) return; // :memory: 不落盘
+    const data = this.db.export();
+    const dir = path.dirname(this.filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(this.filePath, Buffer.from(data));
+  }
+
+  close(): void {
+    this.saveToDisk();
+    this.db.close();
+  }
+}
+
 class Statement {
   constructor(
+    private parent: Database,
     private db: SqlJsDatabase,
     private sql: string,
   ) {}
@@ -44,43 +82,10 @@ class Statement {
     stmt.step();
     const changes = this.db.getRowsModified();
     stmt.free();
-    // sql.js doesn't expose lastInsertRowid natively — use SQL trick
     const row = this.db.exec('SELECT last_insert_rowid() AS id');
     const lastInsertRowid = Number(row[0]?.values?.[0]?.[0] ?? 0);
+    this.parent.saveToDisk(); // 写入后自动落盘
     return { changes, lastInsertRowid };
-  }
-}
-
-export class Database {
-  private db: SqlJsDatabase;
-  private filePath: string;
-
-  constructor(db: SqlJsDatabase, filePath: string) {
-    this.db = db;
-    this.filePath = filePath;
-  }
-
-  exec(sql: string): void {
-    this.db.run(sql);
-  }
-
-  pragma(pragmaStr: string): void {
-    this.db.run(`PRAGMA ${pragmaStr}`);
-  }
-
-  prepare(sql: string): Statement {
-    return new Statement(this.db, sql);
-  }
-
-  close(): void {
-    const data = this.db.export();
-    // :memory: 等特殊路径不落盘
-    if (!this.filePath.startsWith(':')) {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.filePath, Buffer.from(data));
-    }
-    this.db.close();
   }
 }
 
@@ -147,7 +152,6 @@ export function getDatabase(dbPath?: string): Database {
 
   const resolvedPath = dbPath || path.join(app.getPath('userData'), DB_PATH);
 
-  // 从磁盘加载已有数据库，否则创建新的
   let sqlDb: SqlJsDatabase;
   if (fs.existsSync(resolvedPath)) {
     const buffer = fs.readFileSync(resolvedPath);

@@ -5,7 +5,7 @@ import type { Persona, TopicProgress, ChatSession, Stage } from '../shared/types
 import fs from 'fs';
 import path from 'path';
 import { readNote, writeNote, scanVault } from './obsidian-bridge';
-import { streamChatResponse, buildSystemPromptMain } from './llm-service';
+import { streamChatResponse, buildSystemPromptMain, summarizeAndSaveToObsidian, buildObsidianContext, captureAndSave } from './llm-service';
 
 // ── 辅助：加载 curriculum 并查找 stage ──────────────────────────────
 
@@ -55,6 +55,14 @@ function getApiKey(): string | null {
 
 export function registerIpcHandlers(): void {
   const db = getDatabase();
+
+  // ── 应用退出时关闭所有活跃 session ─────────────────────────
+
+  app.on('before-quit', () => {
+    const now = new Date().toISOString();
+    db.prepare("UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL")
+      .run(now);
+  });
 
   // === Sessions ===
   ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, (_event, stageId: string): ChatSession => {
@@ -121,8 +129,23 @@ export function registerIpcHandlers(): void {
       return;
     }
 
-    // 5. 构建 system prompt（现在传入了 stage）
-    const systemPrompt = buildSystemPromptMain(persona, currentStage, progress);
+    // 5. 获取 Obsidian vault 路径，搜索关联笔记
+    const vaultRow = db.prepare("SELECT value FROM settings WHERE key = 'vaultPath'").get() as { value: string } | undefined;
+    const vaultPath = vaultRow?.value || null;
+
+    let keywords: string[] = [];
+    if (currentStage) {
+      keywords.push(currentStage.title, currentStage.id);
+    }
+    const lastUserMsg = [...payload.messages].reverse().find((m: any) => m.role === 'user');
+    if (lastUserMsg?.content) {
+      const words = lastUserMsg.content.split(/[\s，。？！、,\.!\?]+/).filter((w: string) => w.length >= 2).slice(0, 3);
+      keywords.push(...words);
+    }
+    const obsidianContext = buildObsidianContext(vaultPath, keywords);
+
+    // 6. 构建 system prompt（传入 stage + Obsidian 上下文）
+    const systemPrompt = buildSystemPromptMain(persona, currentStage, progress, obsidianContext);
 
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return;
@@ -143,6 +166,41 @@ export function registerIpcHandlers(): void {
       createdAt: r.created_at,
       tokenCount: r.token_count,
     }));
+  });
+
+  // === Session Summarize (AI 总结 + 自动存档到 Obsidian) ===
+  ipcMain.handle(IPC_CHANNELS.SESSION_SUMMARIZE, async (event, sessionId: string) => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      console.log('[summarize IPC] no API key');
+      return { error: '请先在设置中配置 API Key' };
+    }
+    console.log('[summarize IPC] apiKey length:', apiKey.length, 'prefix:', apiKey.slice(0, 4));
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      console.log('[summarize IPC] no window');
+      return { error: 'Window not found' };
+    }
+
+    console.log('[summarize IPC] calling summarizeAndSaveToObsidian, sessionId:', sessionId);
+    const result = await summarizeAndSaveToObsidian(window, sessionId, apiKey);
+    console.log('[summarize IPC] result:', JSON.stringify(result).slice(0, 200));
+    return result;
+  });
+
+  // === Quick Capture (快速捕获：AI 提炼 + 写 Obsidian) ===
+  ipcMain.handle(IPC_CHANNELS.CAPTURE_SAVE, async (event, rawText: string) => {
+    console.log('[capture] start, text length:', rawText.length);
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      console.log('[capture] no API key');
+      return { error: '请先在设置中配置 API Key' };
+    }
+    console.log('[capture] calling captureAndSave...');
+    const result = await captureAndSave(rawText, apiKey);
+    console.log('[capture] result:', JSON.stringify(result).slice(0, 200));
+    return result;
   });
 
   // === Progress ===

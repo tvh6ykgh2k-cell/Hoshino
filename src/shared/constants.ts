@@ -10,6 +10,8 @@ export const IPC_CHANNELS = {
   CHAT_SEND: 'chat:send',
   CHAT_STREAM: 'chat:stream',
   MESSAGES_GET_BY_SESSION: 'messages:getBySession',
+  SESSION_SUMMARIZE: 'session:summarize',
+  CAPTURE_SAVE: 'capture:save',
   SESSION_CREATE: 'session:create',
   SESSION_LIST: 'session:list',
   PROGRESS_GET: 'progress:get',

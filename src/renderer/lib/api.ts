@@ -18,6 +18,9 @@ declare global {
       writeVault: (relativePath: string, content: string) => Promise<void>;
       scanVault: () => Promise<string[]>;
       getMessagesBySession: (sessionId: string) => Promise<ChatMessage[]>;
+      summarizeSession: (sessionId: string) => Promise<{ notePath?: string; error?: string }>;
+      captureSave: (rawText: string) => Promise<{ notePath?: string; title?: string; error?: string; debug?: string }>;
+      readClipboard: () => string;
       getPersona: () => Promise<Persona>;
       setPersona: (persona: Persona) => Promise<void>;
       getSettings: () => Promise<AppSettings>;
@@ -53,6 +56,12 @@ export const api = {
     window.electronAPI.scanVault(),
   getMessagesBySession: (sessionId: string) =>
     window.electronAPI.getMessagesBySession(sessionId),
+  summarizeSession: (sessionId: string) =>
+    window.electronAPI.summarizeSession(sessionId),
+  captureSave: (rawText: string) =>
+    window.electronAPI.captureSave(rawText),
+  readClipboard: () =>
+    window.electronAPI.readClipboard(),
   getPersona: () =>
     window.electronAPI.getPersona(),
   setPersona: (persona: Persona) =>

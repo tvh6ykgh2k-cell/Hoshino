@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { ChatMessage, Persona, Stage, TopicProgress } from '../../shared/types';
+import type { ChatMessage, ChatSession, Persona, Stage, TopicProgress } from '../../shared/types';
 import { api } from '../lib/api';
 
 interface UseChatReturn {
@@ -7,13 +7,16 @@ interface UseChatReturn {
   sendMessage: (content: string) => Promise<void>;
   isLoading: boolean;
   sessionId: string | null;
+  sessions: ChatSession[] | null;
   createNewSession: (stageId: string) => Promise<void>;
+  resumeSession: (sessionId: string) => Promise<void>;
 }
 
 export function useChat(): UseChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<ChatSession[] | null>(null);
   const [persona, setPersona] = useState<Persona | null>(null);
   const [curriculum, setCurriculum] = useState<Stage[]>([]);
   const [progress, setProgress] = useState<TopicProgress[]>([]);
@@ -33,23 +36,33 @@ export function useChat(): UseChatReturn {
     progressRef.current = progress;
   }, [progress]);
 
-  // Load initial data
+  // Load initial data — sessions, persona, curriculum, progress
   useEffect(() => {
     Promise.all([
+      api.listSessions(),
       api.getPersona(),
       api.loadCurriculum(),
       api.getProgress(),
-    ]).then(([p, c, pr]) => {
+    ]).then(([s, p, c, pr]) => {
+      setSessions(s);
       setPersona(p);
       setCurriculum(c as Stage[]);
       setProgress(pr);
     });
   }, []);
 
+  const resumeSession = useCallback(async (sid: string) => {
+    setSessionId(sid);
+    const msgs = await api.getMessagesBySession(sid);
+    setMessages(msgs);
+  }, []);
+
   const createNewSession = useCallback(async (stageId: string) => {
     const session = await api.createSession(stageId);
     setSessionId(session.id);
     setMessages([]);
+    // Refresh session list
+    setSessions(prev => [session, ...prev]);
   }, []);
 
   const sendMessage = useCallback(async (content: string) => {
@@ -126,5 +139,5 @@ export function useChat(): UseChatReturn {
     }
   }, [sessionId, isLoading]);
 
-  return { messages, sendMessage, isLoading, sessionId, createNewSession };
+  return { messages, sendMessage, isLoading, sessionId, sessions, createNewSession, resumeSession };
 }
